@@ -1,167 +1,69 @@
 import os
 import random
 import logging
-from telegram import Update, InputFile
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
-from telegram.utils.helpers import effective_message_type
+import requests
 from PIL import Image
+from flask import Flask, request, jsonify
 
-# Set up logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+app = Flask(__name__)
 
 TOKEN = os.getenv("BOT_TOKEN")
+BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
-# Error handler
-def error_handler(update: Update, context: CallbackContext):
-    logger.error(f"Exception while handling an update: {context.error}")
+def send_message(chat_id, text):
+    url = f"{BASE_URL}/sendMessage"
+    data = {"chat_id": chat_id, "text": text}
+    requests.post(url, json=data)
 
-# /start command
-def start(update: Update, context: CallbackContext):
-    update.message.reply_text(
-        "🎁 Welcome to MagicBox Bot!\n\n"
-        "I can do:\n"
-        "🎵 /music - Get a sample song\n"
-        "📂 /convert - Convert an image to PNG\n"
-        "📝 /feedback <your text> - Send feedback\n"
-        "😂 /fun - Get a random joke\n"
-        "🤝 /help - Show this message again"
-    )
+def send_audio(chat_id, audio_path):
+    url = f"{BASE_URL}/sendAudio"
+    with open(audio_path, "rb") as audio_file:
+        files = {"audio": audio_file}
+        data = {"chat_id": chat_id}
+        requests.post(url, files=files, data=data)
 
-# /help command
-def help_command(update: Update, context: CallbackContext):
-    start(update, context)
+def send_document(chat_id, document_path, caption=""):
+    url = f"{BASE_URL}/sendDocument"
+    with open(document_path, "rb") as doc_file:
+        files = {"document": doc_file}
+        data = {"chat_id": chat_id, "caption": caption}
+        requests.post(url, files=files, data=data)
 
-# /music command
-def music(update: Update, context: CallbackContext):
-    try:
-        update.message.reply_text("🎵 Here's a sample song for you!")
-        update.message.reply_audio(audio=open("sample.mp3", "rb"))
-    except Exception as e:
-        logger.error(f"Error in music command: {e}")
-        update.message.reply_text("⚠️ Sorry, I couldn't send the music file right now.")
-
-# /convert command
-def convert(update: Update, context: CallbackContext):
-    if update.message.document or update.message.photo:
-        try:
-            if update.message.document:
-                file_id = update.message.document.file_id
-                file_name = update.message.document.file_name
-            else:
-                # Handle photo messages
-                file_id = update.message.photo[-1].file_id
-                file_name = "photo.jpg"
-            
-            # Get the file
-            file = context.bot.get_file(file_id)
-            file_path = f"temp_{file_name}"
-            file.download(file_path)
-
-            # Convert to PNG
-            img = Image.open(file_path)
-            png_path = file_path.rsplit(".", 1)[0] + ".png"
-            img.save(png_path, "PNG")
-            
-            update.message.reply_document(document=open(png_path, "rb"), caption="✅ Here's your converted image!")
-            
-            # Clean up
-            os.remove(png_path)
-            os.remove(file_path)
-            
-        except Exception as e:
-            logger.error(f"Error in convert command: {e}")
-            update.message.reply_text("⚠️ Only image files can be converted right now.")
-            # Clean up if files were created
-            if 'file_path' in locals() and os.path.exists(file_path):
-                os.remove(file_path)
-            if 'png_path' in locals() and os.path.exists(png_path):
-                os.remove(png_path)
-    else:
-        update.message.reply_text("📂 Please upload an image file or send it as a photo after typing /convert.")
-
-# /feedback command
-def feedback(update: Update, context: CallbackContext):
-    text = " ".join(context.args)
-    if text:
-        try:
-            with open("feedback.txt", "a", encoding="utf-8") as f:
-                f.write(f"User {update.effective_user.id}: {text}\n")
-            update.message.reply_text("✅ Thanks for your feedback!")
-        except Exception as e:
-            logger.error(f"Error saving feedback: {e}")
-            update.message.reply_text("⚠️ Sorry, I couldn't save your feedback right now.")
-    else:
-        update.message.reply_text("📝 Please type your feedback after /feedback. Example: /feedback This bot is great!")
-
-# /fun command
-def fun(update: Update, context: CallbackContext):
-    jokes = [
-        "😂 Why don't skeletons fight each other? Because they don't have the guts!",
-        "🤣 Parallel lines have so much in common. Too bad they'll never meet.",
-        "😆 I told my computer I needed a break, and it said: 'No problem, I'll go to sleep.'",
-        "😄 Why did the scarecrow win an award? Because he was outstanding in his field!",
-        "😊 What do you call a fake noodle? An impasta!"
-    ]
-    update.message.reply_text(random.choice(jokes))
-
-# Handle document messages
-def handle_document(update: Update, context: CallbackContext):
-    # This will be triggered when user sends a document without /convert command
-    update.message.reply_text("📂 To convert this file to PNG, use the /convert command.")
-
-def main():
-    # Create the Updater
-    updater = Updater(TOKEN, use_context=True)
+@app.route('/' + TOKEN, methods=['POST'])
+def webhook():
+    update = request.get_json()
     
-    # Get the dispatcher to register handlers
-    dp = updater.dispatcher
-
-    # Add handlers
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("help", help_command))
-    dp.add_handler(CommandHandler("music", music))
-    dp.add_handler(CommandHandler("convert", convert))
-    dp.add_handler(CommandHandler("feedback", feedback))
-    dp.add_handler(CommandHandler("fun", fun))
-    
-    # Handle document messages
-    dp.add_handler(MessageHandler(Filters.document, handle_document))
-    
-    # Handle photo messages
-    dp.add_handler(MessageHandler(Filters.photo, handle_document))
-    
-    # Add error handler
-    dp.add_error_handler(error_handler)
-
-    # Start the Bot
-    if os.getenv("RENDER"):
-        # On Render, we need to use webhooks
-        port = int(os.environ.get('PORT', 5000))
-        webhook_url = os.getenv("WEBHOOK_URL")
+    if "message" in update:
+        message = update["message"]
+        chat_id = message["chat"]["id"]
+        text = message.get("text", "")
         
-        if webhook_url:
-            updater.start_webhook(
-                listen="0.0.0.0",
-                port=port,
-                url_path=TOKEN,
-                webhook_url=f"{webhook_url}/{TOKEN}"
-            )
-            logger.info(f"Webhook started on port {port}")
-        else:
-            # Fallback to polling if webhook URL not set
-            logger.info("WEBHOOK_URL not set, using polling instead")
-            updater.start_polling()
-    else:
-        # Local development - use polling
-        logger.info("Running in development mode (polling)")
-        updater.start_polling()
+        if text.startswith("/start") or text.startswith("/help"):
+            send_message(chat_id, "🎁 Welcome to MagicBox Bot!\n\nI can do:\n🎵 /music - Get a sample song\n📂 /convert - Convert an image to PNG\n📝 /feedback <your text> - Send feedback\n😂 /fun - Get a random joke")
+        
+        elif text.startswith("/music"):
+            send_message(chat_id, "🎵 Here's a sample song for you!")
+            send_audio(chat_id, "sample.mp3")
+        
+        elif text.startswith("/fun"):
+            jokes = ["😂 Why don't skeletons fight each other? Because they don't have the guts!", "🤣 Parallel lines have so much in common. Too bad they'll never meet!"]
+            send_message(chat_id, random.choice(jokes))
+        
+        elif text.startswith("/feedback"):
+            feedback_text = text.replace("/feedback", "").strip()
+            if feedback_text:
+                with open("feedback.txt", "a") as f:
+                    f.write(f"User {chat_id}: {feedback_text}\n")
+                send_message(chat_id, "✅ Thanks for your feedback!")
+            else:
+                send_message(chat_id, "📝 Please type your feedback after /feedback")
+    
+    return 'OK'
 
-    # Run the bot until you press Ctrl-C
-    updater.idle()
+@app.route('/')
+def index():
+    return 'MagicBox Bot is running!'
 
 if __name__ == "__main__":
-    main()
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
