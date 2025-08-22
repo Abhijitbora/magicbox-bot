@@ -1,4 +1,4 @@
-telegram==0.0.1
-Pillow==9.5.0
-python-dotenv==0.19.0
-requests==2.28.0
+Flask==2.3.3
+Pillow==10.0.1
+requests==2.31.0
+python-dotenv==1.0.0
