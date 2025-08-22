@@ -1,6 +1,2 @@
-git init
-git add .
-git commit -m "First commit - MagicBox Bot"
-git branch -M main
-git remote add origin https://github.com/your-username/magicbox-bot.git
-git push -u origin main
+python-telegram-bot==20.7
+Pillow==10.2.0
